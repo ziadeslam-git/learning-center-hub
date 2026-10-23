@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "منصة مركز مصادر التعلم"
+description = "منصة عربية لإدارة حجوزات وإشغال مركز مصادر التعلم المدرسي، تشمل لوحات منفصلة للمعلم وأمين المركز وقائد المدرسة، مع بيانات تجريبية قابلة للتبديل لاحقًا بمصدر Supabase."
+version = "1.0.0"
+id = "artifacts/learning-center-booking"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24964
+
+[services.development]
+run = "pnpm --filter @workspace/learning-center-booking run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/learning-center-booking", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/learning-center-booking/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24964"
+BASE_PATH = "/"
