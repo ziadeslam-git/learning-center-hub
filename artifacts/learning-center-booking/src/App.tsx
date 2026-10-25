@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Route, Switch, Link, useLocation } from 'wouter';
 import { BookOpen, CalendarDays, ChartNoAxesCombined, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, Clock3, DoorOpen, FileText, LayoutDashboard, Menu, Plus, Search, Settings, ShieldCheck, X, Check, AlertCircle, Printer, Eye, SlidersHorizontal } from 'lucide-react';
-import { repository, resources, subjects, type DemoData, type Reservation, type Role, type Status } from './data';
+import { roles, resources, subjects, type DemoData, type Reservation, type Role, type Status } from './data';
+import { AppProvider, useApp } from './context/AppContext';
+import { arabicErrorMessage, type BookingInput } from './lib/dataService';
+import { isSupabaseConfigured } from './lib/supabase';
 import ReportsPage from './ReportsPage';
 
-const roles: Role[] = ['المعلم', 'أمين مركز مصادر التعلم', 'قائد المدرسة'];
 const pageTitles: Record<string,string> = {'/dashboard':'الرئيسية','/schedule':'جدول المركز','/reservations/new':'حجز جديد','/reservations':'الحجوزات','/reports':'التقارير','/settings':'الإعدادات'};
 const todayISO = () => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 const fmt = (iso:string, options:Intl.DateTimeFormatOptions={day:'numeric',month:'long'}) => new Intl.DateTimeFormat('ar-SA-u-ca-gregory',options).format(new Date(`${iso}T12:00:00`));
