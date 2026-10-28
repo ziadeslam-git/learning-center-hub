@@ -74,9 +74,15 @@ Deno.serve(async (request) => {
 
     return json(200, { id: invited.user.id, email: invited.user.email, active: false });
   } catch (error) {
-    console.error('admin-invite-user failed');
     const message = error instanceof Error ? error.message : 'INVITATION_FAILED';
+    const code = (error as { code?: string } | null)?.code;
+    const status = (error as { status?: number } | null)?.status;
+    // Log the cause (never the email or tokens) so failures are diagnosable.
+    console.error('admin-invite-user failed', { message, code, status });
     if (message.toLowerCase().includes('already')) return json(409, { error: 'USER_ALREADY_EXISTS' });
+    if (code === 'over_email_send_rate_limit' || status === 429 || message.toLowerCase().includes('rate limit')) {
+      return json(429, { error: 'EMAIL_RATE_LIMIT' });
+    }
     return json(500, { error: 'INVITATION_FAILED' });
   }
 });

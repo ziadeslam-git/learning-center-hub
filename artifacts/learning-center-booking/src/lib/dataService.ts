@@ -294,6 +294,9 @@ export function arabicErrorMessage(error: unknown, fallback = 'تعذر إتما
   if (candidate?.message === 'USER_ALREADY_EXISTS' || message.includes('already been registered') || message.includes('user already registered')) {
     return 'هذا البريد مرتبط بحساب موجود بالفعل.';
   }
+  if (candidate?.message === 'EMAIL_RATE_LIMIT') {
+    return 'تم تجاوز الحد المسموح لإرسال البريد الإلكتروني حاليًا. انتظر ساعة ثم أعد المحاولة، أو فعّل SMTP مخصصًا في Supabase.';
+  }
   if (candidate?.message === 'ADMIN_REQUIRED' || candidate?.message === 'INVALID_SESSION') {
     return 'انتهت صلاحية الجلسة أو لا يملك الحساب صلاحية إدارة المستخدمين. سجّل الدخول مجددًا بحساب أمين المركز.';
   }
