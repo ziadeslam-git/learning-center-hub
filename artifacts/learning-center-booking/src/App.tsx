@@ -53,6 +53,7 @@ function Shell({children,bookingSlot,closeBooking,isSyncing=false}:{children:Rea
       <nav className="side-nav">{links.map(item=><Link key={item.href} href={item.href} className={`nav-link ${path===item.href?'nav-active':''}`} data-testid={`link-nav-${item.href.replace('/','').replace('/','-')}`} onClick={()=>setMobileOpen(false)}><item.icon size={19}/><span>{item.label}</span>{path===item.href&&<i/>}</Link>)}</nav>
       <div className="sidebar-bottom"><div className="user-card"><div className="avatar">{user?.name?.slice(0,1) || 'م'}</div><div className="user-meta"><b>{user?.name || 'الحساب'}</b><small>{role}</small></div><button onClick={()=>void signOut()} className="icon-button" aria-label="تسجيل الخروج" data-testid="button-sign-out"><DoorOpen size={17}/></button></div></div>
     </aside>
+    <nav className="bottom-nav" aria-label="التنقل السريع">{links.filter(x=>x.href!=='/accounts'&&x.href!=='/settings').slice(0,5).map(item=><Link key={item.href} href={item.href} className={`bottom-link ${path===item.href?'bottom-active':''}`} data-testid={`bottom-nav-${item.href.replace('/','').replace('/','-')}`}><item.icon size={21}/><span>{item.label}</span></Link>)}</nav>
     {mobileOpen&&<button className="mobile-scrim" aria-label="إغلاق القائمة" onClick={()=>setMobileOpen(false)}/>}
     <main className="main-area">
       <PageProgressBar active={isSyncing} />
