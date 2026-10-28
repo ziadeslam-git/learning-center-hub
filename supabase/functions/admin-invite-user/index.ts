@@ -59,7 +59,9 @@ Deno.serve(async (request) => {
     const appOrigin = new URL(appUrl).origin;
     const { data: invited, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
       data: { full_name: fullName },
-      redirectTo: `${appOrigin}/login`,
+      // Invitees have no password yet; the app's set-password page needs the
+      // session that the invite link establishes.
+      redirectTo: `${appOrigin}/reset-password`,
     });
     if (inviteError) throw inviteError;
     if (!invited.user) throw new Error('INVITED_USER_MISSING');

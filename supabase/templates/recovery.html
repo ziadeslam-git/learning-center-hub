@@ -1,0 +1,22 @@
+<!-- Supabase Dashboard → Authentication → Emails → Templates → "Reset password".
+     Subject: استعادة كلمة المرور – مركز مصادر التعلم -->
+<div dir="rtl" style="margin:0;padding:24px 12px;background:#f3f6f4;font-family:Tahoma,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #e2eae6;border-radius:12px;overflow:hidden;">
+    <tr>
+      <td style="background:#12372f;padding:22px 28px;text-align:right;">
+        <div style="color:#ffffff;font-size:20px;font-weight:bold;">مركز مصادر التعلم</div>
+        <div style="color:#bcd5cc;font-size:13px;margin-top:4px;">مدرسة الإمام تركي بن عبدالله بالربوعة · منطقة عسير</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:28px;text-align:right;color:#1d2b28;line-height:1.9;font-size:15px;">
+        <div style="font-size:18px;font-weight:bold;margin-bottom:8px;">استعادة كلمة المرور</div>
+        <div>وصلنا طلب لإعادة تعيين كلمة المرور لحسابك. اضغط الزر أدناه لاختيار كلمة مرور جديدة.</div>
+        <div style="text-align:center;margin:28px 0;">
+          <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#12372f;color:#ffffff;text-decoration:none;font-weight:bold;padding:13px 34px;border-radius:9px;">تعيين كلمة مرور جديدة</a>
+        </div>
+        <div style="font-size:12px;color:#8a9692;margin-top:18px;">إذا لم تطلب ذلك فتجاهل الرسالة وستبقى كلمة مرورك كما هي. إن لم يعمل الزر فانسخ الرابط التالي:<br><span style="word-break:break-all;direction:ltr;display:inline-block;">{{ .ConfirmationURL }}</span></div>
+      </td>
+    </tr>
+  </table>
+</div>
