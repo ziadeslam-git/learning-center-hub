@@ -13,17 +13,17 @@ import {
   type StatusCode,
   type Teacher,
   emptyData,
-} from '../data';
-import { requireSupabase } from './supabase';
+} from '../data.ts';
+import { logSupabaseDiagnostic, requireSupabase } from './supabase.ts';
 
-type ProfileRow = {
+export type ProfileRow = {
   id: string;
   full_name: string;
   role: RoleCode;
   is_active: boolean;
   created_at: string;
 };
-type BookingRow = {
+export type BookingRow = {
   id: string;
   teacher_id: string;
   booking_date: string;
@@ -38,7 +38,7 @@ type BookingRow = {
   notes: string | null;
   status: StatusCode;
 };
-type BlockedRow = {
+export type BlockedRow = {
   id: string;
   blocked_date: string;
   period_number: number | null;
@@ -112,7 +112,10 @@ export async function fetchOwnProfile(userId: string): Promise<Teacher | null> {
     .eq('id', userId)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) {
+    logSupabaseDiagnostic('profiles.select.own', error);
+    throw error;
+  }
   if (!data) return null;
   return mapProfile(data as ProfileRow);
 }
@@ -140,7 +143,10 @@ export async function loadAppData(role: Role, userId: string): Promise<DemoData>
     settingsResult.error,
     occupancyResult.error,
   ].find(Boolean);
-  if (firstError) throw firstError;
+  if (firstError) {
+    logSupabaseDiagnostic('appData.select', firstError);
+    throw firstError;
+  }
 
   if (!settingsResult.data) {
     throw new Error('SCHOOL_SETTINGS_NOT_CONFIGURED');
@@ -179,22 +185,27 @@ export async function loadAppData(role: Role, userId: string): Promise<DemoData>
   };
 }
 
-export async function createBooking(input: BookingInput): Promise<void> {
-  const { error } = await requireSupabase().from('bookings').insert({
-    teacher_id: input.teacherId,
-    booking_date: input.date,
-    period_number: input.period,
-    subject: input.subject,
-    education_stage: input.stage,
-    grade: input.grade,
-    section: input.section,
-    lesson_topic: input.lessonTopic,
-    resources: input.resources,
-    student_count: input.studentCount ?? null,
-    notes: input.notes ?? null,
-    status: 'confirmed',
-  });
+export async function createBooking(input: BookingInput): Promise<BookingRow> {
+  const { data, error } = await requireSupabase()
+    .from('bookings')
+    .insert({
+      teacher_id: input.teacherId,
+      booking_date: input.date,
+      period_number: input.period,
+      subject: input.subject,
+      education_stage: input.stage,
+      grade: input.grade,
+      section: input.section,
+      lesson_topic: input.lessonTopic,
+      resources: input.resources,
+      student_count: input.studentCount ?? null,
+      notes: input.notes ?? null,
+      status: 'confirmed',
+    })
+    .select('*')
+    .single();
   if (error) throw error;
+  return data as BookingRow;
 }
 
 export async function updateBookingStatus(id: string, status: Status): Promise<void> {
@@ -225,13 +236,18 @@ export async function saveSchoolSettings(settings: SettingsUpdate): Promise<void
   if (!data) throw new Error('SCHOOL_SETTINGS_NOT_UPDATED');
 }
 
-export async function addBlockedSlot(date: string, period: number | null, reason: string): Promise<void> {
-  const { error } = await requireSupabase().from('blocked_slots').insert({
-    blocked_date: date,
-    period_number: period,
-    reason,
-  });
+export async function addBlockedSlot(date: string, period: number | null, reason: string): Promise<BlockedRow> {
+  const { data, error } = await requireSupabase()
+    .from('blocked_slots')
+    .insert({
+      blocked_date: date,
+      period_number: period,
+      reason,
+    })
+    .select('*')
+    .single();
   if (error) throw error;
+  return data as BlockedRow;
 }
 
 export async function deleteBlockedSlot(id: string): Promise<void> {
@@ -261,9 +277,64 @@ export async function updateProfile(id: string, update: ProfileUpdate): Promise<
 }
 
 export function arabicErrorMessage(error: unknown, fallback = 'تعذر إتمام العملية. يرجى المحاولة مرة أخرى.') {
-  const candidate = error as { code?: string; message?: string };
+  const candidate = error as {
+    code?: string;
+    message?: string;
+    status?: number;
+    statusCode?: number;
+    name?: string;
+    context?: { status?: number; statusCode?: number };
+  };
+  const code = candidate?.code?.toLowerCase();
+  const message = candidate?.message?.toLowerCase() ?? '';
+  const status = candidate?.status ?? candidate?.statusCode ?? candidate?.context?.status ?? candidate?.context?.statusCode;
+  if (candidate?.message === 'FUNCTION_CONFIGURATION_MISSING') {
+    return 'إعدادات دعوة الحساب ناقصة على الخادم. أضف APP_URL وSUPABASE_SERVICE_ROLE_KEY إلى Edge Function ثم أعد نشرها.';
+  }
+  if (candidate?.message === 'USER_ALREADY_EXISTS' || message.includes('already been registered') || message.includes('user already registered')) {
+    return 'هذا البريد مرتبط بحساب موجود بالفعل.';
+  }
+  if (candidate?.message === 'ADMIN_REQUIRED' || candidate?.message === 'INVALID_SESSION') {
+    return 'انتهت صلاحية الجلسة أو لا يملك الحساب صلاحية إدارة المستخدمين. سجّل الدخول مجددًا بحساب أمين المركز.';
+  }
+  if (
+    candidate?.message === 'FUNCTION_NOT_FOUND' ||
+    (status === 404 && (message.includes('function') || candidate?.name === 'FunctionsHttpError'))
+  ) {
+    return 'خدمة دعوة الحساب غير منشورة في مشروع Supabase. انشر Edge Function باسم admin-invite-user.';
+  }
   if (candidate?.message === 'SUPABASE_CONFIGURATION_MISSING') {
     return 'إعدادات الاتصال بـ Supabase غير مكتملة. تحقق من متغيري VITE_SUPABASE_URL وVITE_SUPABASE_PUBLISHABLE_KEY.';
+  }
+  if (code === 'invalid_credentials' || message.includes('invalid login credentials')) {
+    return 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
+  }
+  if (code === 'email_not_confirmed' || message.includes('email not confirmed')) {
+    return 'لم يتم تأكيد البريد الإلكتروني بعد. افتح رسالة التأكيد ثم حاول تسجيل الدخول.';
+  }
+  if (code === 'profile_missing' || candidate?.message === 'PROFILE_NOT_FOUND') {
+    return 'تم التحقق من كلمة المرور، لكن لا يوجد ملف صلاحيات لهذا الحساب. تواصل مع مسؤول المركز.';
+  }
+  if (code === 'account_inactive' || candidate?.message === 'ACCOUNT_INACTIVE') {
+    return 'تم تسجيل الدخول، لكن الحساب غير مفعّل بعد. تواصل مع مسؤول المركز.';
+  }
+  if (candidate?.name === 'TypeError' || /fetch failed|failed to fetch|networkerror|network request failed/.test(message)) {
+    return 'تعذر الاتصال بخدمة Supabase. تحقق من اتصال الإنترنت ثم حاول مرة أخرى.';
+  }
+  if (status === 401 && (message.includes('email not confirmed') || code === 'email_not_confirmed')) {
+    return 'لم يتم تأكيد البريد الإلكتروني بعد. افتح رسالة التأكيد ثم حاول تسجيل الدخول.';
+  }
+  if (status === 401 && (message.includes('invalid login') || code === 'invalid_credentials')) {
+    return 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
+  }
+  if (status === 401 || status === 403 || code === '42501' || code?.startsWith('pgrst')) {
+    if (message.includes('cannot change their own role') || message.includes('users cannot change')) {
+      return 'لا يمكنك تغيير دورك أو تعطيل حسابك بنفسك.';
+    }
+    return 'رفضت قاعدة البيانات الطلب. تحقق من صلاحيات الحساب وسياسات الوصول في Supabase.';
+  }
+  if (status && status >= 500) {
+    return 'حدث عطل مؤقت في خدمة قاعدة البيانات. حاول مرة أخرى بعد قليل.';
   }
   if (candidate?.message === 'SCHOOL_SETTINGS_NOT_CONFIGURED') {
     return 'لم يتم العثور على إعدادات المدرسة. تأكد من تشغيل ملف قاعدة البيانات الأولي في Supabase.';
@@ -272,9 +343,24 @@ export function arabicErrorMessage(error: unknown, fallback = 'تعذر إتما
     return 'عذرًا، هذه الحصة محجوزة بالفعل. يرجى اختيار موعد آخر.';
   }
   if (candidate?.code === '42501') {
+    if (message.includes('cannot change their own role') || message.includes('users cannot change')) {
+      return 'لا يمكنك تغيير دورك أو تعطيل حسابك بنفسك.';
+    }
     return 'ليست لديك صلاحية لتنفيذ هذا الإجراء، أو أن الحساب غير مفعّل.';
   }
   if (candidate?.code === '23514' || candidate?.code === 'P0001') {
+    if (message.includes('cannot block') || message.includes('active bookings')) {
+      return 'لا يمكن إغلاق فترة تحتوي على حجوزات نشطة.';
+    }
+    if (message.includes('conflicts with')) {
+      return 'يوجد تعارض مع إغلاق مسجل مسبقًا لهذا اليوم.';
+    }
+    if (message.includes('last active administrator')) {
+      return 'لا يمكن تعطيل أو تخفيض رتبة المسؤول النشط الأخير.';
+    }
+    if (message.includes('future date') || message.includes('scheduled for a future')) {
+      return 'يجب اختيار تاريخ مستقبلي ليوم دراسي.';
+    }
     return 'تعذر حفظ البيانات. تحقق من اليوم والفترة وحالة الحجز.';
   }
   return fallback;

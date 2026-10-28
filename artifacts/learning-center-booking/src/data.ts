@@ -33,6 +33,8 @@ export type Teacher = {
   role: Role;
   isActive: boolean;
   createdAt: string;
+  subject?: string;
+  stage?: 'متوسط' | 'ثانوي';
 };
 export type Reservation = {
   id: string;

@@ -53,3 +53,16 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Local environment
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+
+# Local pnpm content-addressable store
+.pnpm-store/
+
+# Supabase CLI local state
+supabase/.temp/

@@ -2,11 +2,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import type { Session } from '@supabase/supabase-js';
 import {
   emptyData,
+  roleToCode,
+  statusFromCode,
   type DemoData,
   type Role,
   type Teacher,
   type Status,
-} from '../data';
+  type Reservation,
+} from '../data.ts';
 import {
   addBlockedSlot as addBlockedSlotRequest,
   arabicErrorMessage,
@@ -20,8 +23,9 @@ import {
   type BookingInput,
   type ProfileUpdate,
   type SettingsUpdate,
-} from '../lib/dataService';
-import { isSupabaseConfigured, requireSupabase, supabase } from '../lib/supabase';
+} from '../lib/dataService.ts';
+import { isProfilePending } from '../lib/schoolCalendar.ts';
+import { isSupabaseConfigured, logSupabaseDiagnostic, requireSupabase, supabase } from '../lib/supabase.ts';
 
 type ToastKind = 'success' | 'error' | 'info';
 type AppContextValue = {
@@ -33,11 +37,13 @@ type AppContextValue = {
   authLoading: boolean;
   profileLoading: boolean;
   dataLoading: boolean;
+  isSyncing: boolean;
   profileError: string | null;
   dataError: string | null;
   bookingSlot: { date: string; period: number } | null;
   toast: (message: string, kind?: ToastKind) => void;
   openBooking: (date: string, period: number) => void;
+  closeBooking: () => void;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
@@ -49,6 +55,7 @@ type AppContextValue = {
   addBlockedSlot: (date: string, period: number | null, reason: string) => Promise<void>;
   deleteBlockedSlot: (id: string) => Promise<void>;
   updateProfile: (id: string, update: ProfileUpdate) => Promise<void>;
+  inviteUser: (email: string, fullName: string, role: Role) => Promise<void>;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -64,8 +71,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [authLoading, setAuthLoading] = useState(true);
   const [profile, setProfile] = useState<Teacher | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  // User id whose profile fetch has finished. Covers the render between the
+  // session arriving and the fetch effect starting, which otherwise looks like
+  // "no profile" and flashes the account-problem screen.
+  const [profileSettledFor, setProfileSettledFor] = useState<string | null>(null);
   const [data, setData] = useState<DemoData>(emptyData);
   const [dataLoading, setDataLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [dataError, setDataError] = useState<string | null>(null);
   const [bookingSlot, setBookingSlot] = useState<{ date: string; period: number } | null>(null);
@@ -73,7 +85,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const toast = useCallback((message: string, kind: ToastKind = 'info') => {
     setNotice({ text: message, kind });
-    window.setTimeout(() => setNotice((current) => current?.text === message ? null : current), 3800);
+    window.setTimeout(() => setNotice((current) => (current?.text === message ? null : current)), 3800);
   }, []);
 
   useEffect(() => {
@@ -127,34 +139,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setProfileError(null);
     setDataError(null);
     setProfileLoading(true);
+    setDataLoading(true);
 
     void (async () => {
       try {
         const ownProfile = await fetchOwnProfile(session.user.id);
         if (!mounted) return;
         setProfile(ownProfile);
-        setProfileLoading(false);
-        if (!ownProfile?.isActive) return;
+        if (!ownProfile?.isActive) {
+          setProfileLoading(false);
+          return;
+        }
 
-        setDataLoading(true);
         const loadedData = await loadAppData(ownProfile.role, session.user.id);
         if (mounted) {
           setData(loadedData);
           setDataError(null);
+          setProfileLoading(false);
         }
       } catch (error) {
+        logSupabaseDiagnostic('profiles.select.own', error);
         if (mounted) {
-          const message = (error as { message?: string })?.message;
-          setProfileError(
-            message === 'SUPABASE_CONFIGURATION_MISSING'
-              ? arabicErrorMessage(error)
-              : 'تعذر تحميل بيانات الحساب. تأكد من تطبيق ملف قاعدة البيانات وسياسات الوصول في Supabase.',
-          );
+          setProfileError(arabicErrorMessage(error, 'تعذر تحميل ملف الحساب من قاعدة البيانات. تحقق من صلاحيات الحساب وسياسات الوصول.'));
         }
       } finally {
         if (mounted) {
           setProfileLoading(false);
           setDataLoading(false);
+          setProfileSettledFor(session.user.id);
         }
       }
     })();
@@ -165,23 +177,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [session?.user.id]);
 
   const refreshData = useCallback(async () => {
-    if (!session?.user.id || !profile?.isActive) return;
-    setDataLoading(true);
+    if (!session?.user.id) return;
     try {
-      const nextData = await loadAppData(profile.role, session.user.id);
+      const ownProfile = await fetchOwnProfile(session.user.id);
+      setProfile(ownProfile);
+      if (!ownProfile?.isActive) {
+        setData(emptyData);
+        setDataError(null);
+        return;
+      }
+      setProfileError(null);
+      const nextData = await loadAppData(ownProfile.role, session.user.id);
       setData(nextData);
       setDataError(null);
-    } catch {
-      setDataError('تعذر تحديث البيانات من Supabase. تحقق من الاتصال ثم أعد المحاولة.');
-    } finally {
-      setDataLoading(false);
+    } catch (error) {
+      logSupabaseDiagnostic('appData.refresh', error);
+      const message = arabicErrorMessage(error, 'تعذر تحديث البيانات من قاعدة البيانات. أعد المحاولة.');
+      setDataError(message);
+      throw new Error(message);
     }
-  }, [profile?.isActive, profile?.role, session?.user.id]);
+  }, [session?.user.id]);
+
+  const syncDataInBackground = useCallback(async () => {
+    if (!session?.user.id) return;
+    setIsSyncing(true);
+    try {
+      const ownProfile = await fetchOwnProfile(session.user.id);
+      setProfile(ownProfile);
+      if (!ownProfile?.isActive) return;
+      const nextData = await loadAppData(ownProfile.role, session.user.id);
+      setData(nextData);
+    } catch (error) {
+      logSupabaseDiagnostic('appData.backgroundSync', error);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [session?.user.id]);
 
   useEffect(() => {
     if (!profile?.isActive || !session?.user.id || !supabase) return;
+    let refreshTimer: number | undefined;
     const refresh = () => {
-      if (document.visibilityState === 'visible') void refreshData();
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => void syncDataInBackground(), 1500);
     };
     const channel = supabase
       .channel(`learning-center-${session.user.id}`)
@@ -190,21 +228,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'school_settings' }, refresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, refresh)
       .subscribe();
-    const interval = window.setInterval(refresh, 30000);
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refresh);
 
     return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', refresh);
-      document.removeEventListener('visibilitychange', refresh);
+      window.clearTimeout(refreshTimer);
       void requireSupabase().removeChannel(channel);
     };
-  }, [profile?.isActive, refreshData, session?.user.id]);
+  }, [profile?.isActive, syncDataInBackground, session?.user.id]);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await requireSupabase().auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    const { error } = await requireSupabase().auth.signInWithPassword({ email: email.trim(), password });
+    if (error) {
+      logSupabaseDiagnostic('auth.signInWithPassword', error);
+      throw error;
+    }
   }, []);
 
   const signOut = useCallback(async () => {
@@ -213,9 +249,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const sendPasswordReset = useCallback(async (email: string) => {
-    const currentPath = window.location.pathname;
-    const appPrefix = currentPath.replace(/recover\/?$/, '');
-    const redirectTo = `${window.location.origin}${appPrefix}reset-password`;
+    const basePath = import.meta.env.BASE_URL.endsWith('/')
+      ? import.meta.env.BASE_URL
+      : `${import.meta.env.BASE_URL}/`;
+    const redirectTo = new URL(`${basePath}reset-password`, window.location.origin).toString();
     const { error } = await requireSupabase().auth.resetPasswordForEmail(email, { redirectTo });
     if (error) throw error;
   }, []);
@@ -225,10 +262,109 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   }, []);
 
-  const withRefresh = useCallback(async (operation: () => Promise<void>) => {
-    await operation();
-    await refreshData();
-  }, [refreshData]);
+  const inviteUser = useCallback(async (email: string, fullName: string, role: Role) => {
+    const { data: response, error } = await requireSupabase().functions.invoke('admin-invite-user', {
+      body: { email, fullName, role: roleToCode[role] },
+    });
+    if (error) {
+      const context = error.context as Response | undefined;
+      if (context && typeof context.json === 'function') {
+        const body = await context.clone().json().catch(() => null) as { error?: string } | null;
+        if (body?.error) throw new Error(body.error);
+      }
+      throw error;
+    }
+    if (response?.error) throw new Error(String(response.error));
+    await syncDataInBackground();
+  }, [syncDataInBackground]);
+
+  const createBooking = useCallback(async (input: BookingInput) => {
+    const row = await createBookingRequest(input);
+    const teacher = data.teachers.find((t) => t.id === input.teacherId) || profile;
+    const newReservation: Reservation = {
+      id: row.id,
+      teacherId: row.teacher_id,
+      teacherName: teacher?.name ?? 'معلم',
+      subject: row.subject,
+      stage: row.education_stage,
+      grade: row.grade,
+      section: row.section ?? '',
+      date: row.booking_date,
+      period: row.period_number,
+      lessonTopic: row.lesson_topic,
+      resources: row.resources ?? [],
+      studentCount: row.student_count ?? undefined,
+      notes: row.notes ?? undefined,
+      status: statusFromCode[row.status],
+    };
+    setData((prev) => ({
+      ...prev,
+      reservations: [newReservation, ...prev.reservations],
+      occupancy: [{ date: row.booking_date, period: row.period_number, status: 'مؤكد' }, ...prev.occupancy],
+    }));
+  }, [data.teachers, profile]);
+
+  const updateBookingStatus = useCallback(async (id: string, status: Status) => {
+    await updateBookingStatusRequest(id, status);
+    setData((prev) => {
+      let targetDate = '';
+      let targetPeriod = 0;
+      const reservations = prev.reservations.map((r) => {
+        if (r.id === id) {
+          targetDate = r.date;
+          targetPeriod = r.period;
+          return { ...r, status };
+        }
+        return r;
+      });
+      const occupancy = prev.occupancy.map((o) => {
+        if (o.date === targetDate && o.period === targetPeriod) {
+          return { ...o, status };
+        }
+        return o;
+      });
+      return { ...prev, reservations, occupancy };
+    });
+  }, []);
+
+  const saveSchoolSettings = useCallback(async (settings: SettingsUpdate) => {
+    await saveSchoolSettingsRequest(settings);
+    setData((prev) => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        school: settings.school,
+        administration: settings.administration,
+        region: settings.region,
+        centerAdmin: settings.centerAdmin,
+        principal: settings.principal,
+      },
+    }));
+  }, []);
+
+  const addBlockedSlot = useCallback(async (date: string, period: number | null, reason: string) => {
+    const row = await addBlockedSlotRequest(date, period, reason);
+    setData((prev) => ({
+      ...prev,
+      blocked: [...prev.blocked, { id: row.id, date: row.blocked_date, period: row.period_number, reason: row.reason }],
+    }));
+  }, []);
+
+  const deleteBlockedSlot = useCallback(async (id: string) => {
+    await deleteBlockedSlotRequest(id);
+    setData((prev) => ({
+      ...prev,
+      blocked: prev.blocked.filter((b) => b.id !== id),
+    }));
+  }, []);
+
+  const updateProfile = useCallback(async (id: string, update: ProfileUpdate) => {
+    await updateProfileRequest(id, update);
+    setData((prev) => ({
+      ...prev,
+      teachers: prev.teachers.map((t) => (t.id === id ? { ...t, name: update.name, role: update.role, isActive: update.isActive } : t)),
+    }));
+  }, []);
 
   const contextValue = useMemo<AppContextValue>(() => ({
     data,
@@ -237,27 +373,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     profile,
     session,
     authLoading,
-    profileLoading,
+    profileLoading: isProfilePending(session?.user.id ?? null, profileSettledFor, profileLoading, Boolean(profileError)),
     dataLoading,
+    isSyncing,
     profileError,
     dataError,
     bookingSlot,
     toast,
     openBooking: (date, period) => setBookingSlot({ date, period }),
+    closeBooking: () => setBookingSlot(null),
     signIn,
     signOut,
     sendPasswordReset,
     updatePassword,
     refreshData,
-    createBooking: (input) => withRefresh(() => createBookingRequest(input)),
-    updateBookingStatus: (id, status) => withRefresh(() => updateBookingStatusRequest(id, status)),
-    saveSchoolSettings: (settings) => withRefresh(() => saveSchoolSettingsRequest(settings)),
-    addBlockedSlot: (date, period, reason) => withRefresh(() => addBlockedSlotRequest(date, period, reason)),
-    deleteBlockedSlot: (id) => withRefresh(() => deleteBlockedSlotRequest(id)),
-    updateProfile: (id, update) => withRefresh(() => updateProfileRequest(id, update)),
+    createBooking,
+    updateBookingStatus,
+    saveSchoolSettings,
+    addBlockedSlot,
+    deleteBlockedSlot,
+    updateProfile,
+    inviteUser,
   }), [
-    data, profile, session, authLoading, profileLoading, dataLoading, profileError, dataError, bookingSlot,
-    toast, signIn, signOut, sendPasswordReset, updatePassword, refreshData, withRefresh,
+    data, profile, session, authLoading, profileLoading, profileSettledFor, dataLoading, isSyncing, profileError, dataError, bookingSlot,
+    toast, signIn, signOut, sendPasswordReset, updatePassword, refreshData, createBooking, updateBookingStatus,
+    saveSchoolSettings, addBlockedSlot, deleteBlockedSlot, updateProfile, inviteUser,
   ]);
 
   return (
@@ -273,4 +413,3 @@ export function AppProvider({ children }: { children: ReactNode }) {
     </AppContext.Provider>
   );
 }
-

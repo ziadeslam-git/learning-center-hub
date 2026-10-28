@@ -1,45 +1,33 @@
 import { useMemo, useState } from 'react';
 import { ChartNoAxesCombined, Check, ClipboardList, Clock3 } from 'lucide-react';
 import type { DemoData, Reservation } from './data';
+import { addSchoolDays, countSchoolPeriods, dateFromISO, dateToISO, formatSchoolDate, schoolTodayISO, weekStartISO } from './lib/schoolCalendar';
+import { generateReportDocx } from './lib/exportDocx';
+import { Spinner } from './components/ui/LoadingSystem';
 
 type Props = { data: DemoData };
 type RangePreset = 'weekly' | 'monthly' | 'custom';
 
-const dateISO = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-
-const todayISO = () => dateISO(new Date());
+const todayISO = () => schoolTodayISO();
 
 const formatDate = (value: string, options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long' }) =>
-  new Intl.DateTimeFormat('ar-SA-u-ca-gregory', options).format(new Date(`${value}T12:00:00`));
+  formatSchoolDate(value, options);
 
 const sundayOf = (value: string) => {
-  const date = new Date(`${value}T12:00:00`);
-  date.setDate(date.getDate() - date.getDay());
-  return dateISO(date);
+  return weekStartISO(value);
 };
 
 const lastDayOfMonth = (value: string) => {
   const [year, month] = value.split('-').map(Number);
-  return dateISO(new Date(year, month, 0));
+  return dateToISO(new Date(Date.UTC(year, month, 0)));
 };
 
 function schoolPeriods(data: DemoData, start: string, end: string) {
-  let periods = 0;
-  for (const date = new Date(`${start}T12:00:00`); date <= new Date(`${end}T12:00:00`); date.setDate(date.getDate() + 1)) {
-    if (date.getDay() <= 4) periods += 7;
-  }
-  const blocked = data.blocked.filter((slot) => {
-    const day = new Date(`${slot.date}T12:00:00`).getDay();
-    return slot.date >= start && slot.date <= end && day <= 4;
-  }).length;
-  return Math.max(0, periods - blocked);
+  return countSchoolPeriods(data.blocked, start, end, data.settings.periods);
 }
 
 function addDays(value: string, days: number) {
-  const date = new Date(`${value}T12:00:00`);
-  date.setDate(date.getDate() + days);
-  return dateISO(date);
+  return addSchoolDays(value, days);
 }
 
 function StatCard({ label, value, detail, icon: Icon }: { label: string; value: string | number; detail: string; icon: typeof Check }) {
@@ -83,6 +71,17 @@ export default function ReportsPage({ data }: Props) {
   const capacity = schoolPeriods(data, range.start, range.end);
   const occupancy = capacity ? Math.round((completed.length / capacity) * 100) : 0;
   const activeReservations = reservations.filter((reservation) => reservation.status !== 'ملغي');
+  const teacherActivity = data.teachers
+    .filter((teacher) => teacher.role === 'المعلم' || reservations.some((reservation) => reservation.teacherId === teacher.id))
+    .map((teacher) => {
+      const teacherReservations = reservations.filter((reservation) => reservation.teacherId === teacher.id);
+      return {
+        ...teacher,
+        total: teacherReservations.length,
+        completed: teacherReservations.filter((reservation) => reservation.status === 'تم التنفيذ').length,
+      };
+    })
+    .sort((left, right) => right.total - left.total || left.name.localeCompare(right.name, 'ar'));
   const bySubject = countBy(activeReservations, (reservation) => reservation.subject);
   const byGrade = countBy(activeReservations, (reservation) => reservation.grade);
   const byStage = countBy(activeReservations, (reservation) => reservation.stage);
@@ -90,8 +89,8 @@ export default function ReportsPage({ data }: Props) {
   const bestGrade = byGrade[0]?.name || '—';
 
   const trend = useMemo(() => {
-    const start = new Date(`${range.start}T12:00:00`);
-    const end = new Date(`${range.end}T12:00:00`);
+    const start = dateFromISO(range.start);
+    const end = dateFromISO(range.end);
     const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
     const chunk = Math.max(1, Math.ceil(days / 8));
     const bins: { label: string; completed: number; eligible: number }[] = [];
@@ -114,6 +113,25 @@ export default function ReportsPage({ data }: Props) {
     { value: 'monthly', label: 'شهري' },
     { value: 'custom', label: 'فترة مخصصة' },
   ];
+
+  const [exportingWord, setExportingWord] = useState(false);
+
+  const downloadWord = async () => {
+    setExportingWord(true);
+    try {
+      const blob = await generateReportDocx(data, range);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `learning-center-report-${range.start}-${range.end}.docx`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      console.error('Word export failed:', e);
+    } finally {
+      setExportingWord(false);
+    }
+  };
 
   return (
     <>
@@ -185,6 +203,15 @@ export default function ReportsPage({ data }: Props) {
             return <div className="stage-bar" key={stage}><div><span>{stage}</span><b>{count} حجز · {percent}%</b></div><i><em style={{ width: `${percent}%` }} /></i></div>;
           })}</div> : <p className="report-empty">لا توجد حجوزات في الفترة المحددة.</p>}
         </section>
+        <section className="panel report-chart">
+          <div className="panel-title"><div><h2>نشاط المعلمين</h2><p>الحجوزات المسجلة لكل معلم خلال الفترة المختارة</p></div></div>
+          {teacherActivity.length ? <div className="report-meters">{teacherActivity.map((teacher) => (
+            <div className="subject-meter" key={teacher.id}>
+              <div><span>{teacher.name} · {teacher.isActive ? 'نشط' : 'غير مفعّل'}</span><b>{teacher.total} حجز · {teacher.completed} منفذ</b></div>
+              <i><em style={{ width: `${Math.max(5, (teacher.total / Math.max(1, teacherActivity[0].total)) * 100)}%` }} /></i>
+            </div>
+          ))}</div> : <p className="report-empty">لا توجد حسابات معلمين أو حجوزات لهم خلال الفترة.</p>}
+        </section>
       </div>
 
       <div className="report-layout">
@@ -198,6 +225,14 @@ export default function ReportsPage({ data }: Props) {
           <div className="report-summary"><b>ملخص الفترة</b><p>بلغ عدد الحجوزات <strong>{reservations.length}</strong> حجزًا، نُفذ منها <strong>{completed.length}</strong> حصة من أصل <strong>{capacity}</strong> فترة مدرسية مؤهلة، بنسبة إشغال فعلية قدرها <strong>{occupancy}%</strong>.</p></div>
           <div className="report-summary report-summary-secondary"><span>الملغاة: <b>{cancelled.length}</b></span><span>غير المنفذة: <b>{missed.length}</b></span><span>الأكثر استخدامًا: <b>{bestSubject}</b></span><span>الصف الأكثر استفادة: <b>{bestGrade}</b></span></div>
           <div className="report-table">
+            <b>نشاط المعلمين</b>
+            <table><thead><tr><th>المعلم</th><th>حجوزات الفترة</th><th>الحصص المنفذة</th><th>حالة الحساب</th></tr></thead>
+              <tbody>{teacherActivity.length ? teacherActivity.map((teacher) => (
+                <tr key={teacher.id}><td>{teacher.name}</td><td>{teacher.total}</td><td>{teacher.completed}</td><td>{teacher.isActive ? 'نشط' : 'غير مفعّل'}</td></tr>
+              )) : <tr><td colSpan={4}>لا توجد حسابات معلمين</td></tr>}</tbody>
+            </table>
+          </div>
+          <div className="report-table">
             <b>تفاصيل الحجوزات</b>
             <table><thead><tr><th>التاريخ</th><th>المعلم</th><th>المادة</th><th>الصف</th><th>الفترة</th><th>الحالة</th></tr></thead>
               <tbody>{reservations.length ? reservations.map((reservation: Reservation) => (
@@ -208,11 +243,19 @@ export default function ReportsPage({ data }: Props) {
           <div className="signatures"><div><span>أمين مركز مصادر التعلم</span><b>{data.settings.centerAdmin}</b><i>التوقيع: __________________</i></div><div><span>اعتماد قائد المدرسة</span><b>{data.settings.principal}</b><i>التوقيع: __________________</i></div></div>
         </section>
         <aside className="panel report-side">
-          <div className="panel-title"><div><h2>تنزيل التقرير</h2><p>سيُتاح التصدير في المرحلة الثالثة</p></div></div>
-          <p className="phase-note">أزرار PDF وWord غير متاحة في هذا الإصدار التجريبي.</p>
-          <button className="btn btn-disabled" disabled data-testid="button-export-pdf">تصدير PDF · المرحلة الثالثة</button>
-          <button className="btn btn-disabled" disabled data-testid="button-export-word">تصدير Word · المرحلة الثالثة</button>
-          <p className="demo-advisory">تستند الإحصاءات إلى بيانات العرض المحفوظة محليًا فقط.</p>
+          <div className="panel-title"><div><h2>تنزيل التقرير</h2><p>تصدير بيانات الفترة الحالية</p></div></div>
+          <button className="btn btn-primary" onClick={() => window.print()} data-testid="button-export-pdf">طباعة / حفظ PDF</button>
+          <button
+            className="btn btn-secondary"
+            onClick={downloadWord}
+            disabled={exportingWord}
+            aria-busy={exportingWord}
+            data-testid="button-export-word"
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+          >
+            {exportingWord && <Spinner size="sm" />}
+            <span>{exportingWord ? 'جارٍ إنشاء ملف Word…' : 'تنزيل Word (DOCX)'}</span>
+          </button>
         </aside>
       </div>
     </>

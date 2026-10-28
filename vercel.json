@@ -1,0 +1,8 @@
+{
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @workspace/learning-center-booking run build",
+  "outputDirectory": "artifacts/learning-center-booking/dist/public",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
