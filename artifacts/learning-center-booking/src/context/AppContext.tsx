@@ -56,6 +56,7 @@ type AppContextValue = {
   deleteBlockedSlot: (id: string) => Promise<void>;
   updateProfile: (id: string, update: ProfileUpdate) => Promise<void>;
   inviteUser: (email: string, fullName: string, role: Role) => Promise<void>;
+  deleteAccount: (id: string) => Promise<void>;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -278,6 +279,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await syncDataInBackground();
   }, [syncDataInBackground]);
 
+  const deleteAccount = useCallback(async (id: string) => {
+    const { data: response, error } = await requireSupabase().functions.invoke('admin-delete-user', {
+      body: { userId: id },
+    });
+    if (error) {
+      const context = error.context as Response | undefined;
+      if (context && typeof context.json === 'function') {
+        const body = await context.clone().json().catch(() => null) as { error?: string } | null;
+        if (body?.error) throw new Error(body.error);
+      }
+      throw error;
+    }
+    if (response?.error) throw new Error(String(response.error));
+    setData((prev) => ({ ...prev, teachers: prev.teachers.filter((t) => t.id !== id) }));
+  }, []);
+
   const createBooking = useCallback(async (input: BookingInput) => {
     const row = await createBookingRequest(input);
     const teacher = data.teachers.find((t) => t.id === input.teacherId) || profile;
@@ -394,10 +411,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     deleteBlockedSlot,
     updateProfile,
     inviteUser,
+    deleteAccount,
   }), [
     data, profile, session, authLoading, profileLoading, profileSettledFor, dataLoading, isSyncing, profileError, dataError, bookingSlot,
     toast, signIn, signOut, sendPasswordReset, updatePassword, refreshData, createBooking, updateBookingStatus,
-    saveSchoolSettings, addBlockedSlot, deleteBlockedSlot, updateProfile, inviteUser,
+    saveSchoolSettings, addBlockedSlot, deleteBlockedSlot, updateProfile, inviteUser, deleteAccount,
   ]);
 
   return (

@@ -294,6 +294,18 @@ export function arabicErrorMessage(error: unknown, fallback = 'تعذر إتما
   if (candidate?.message === 'USER_ALREADY_EXISTS' || message.includes('already been registered') || message.includes('user already registered')) {
     return 'هذا البريد مرتبط بحساب موجود بالفعل.';
   }
+  if (candidate?.message === 'USER_HAS_BOOKINGS') {
+    return 'لا يمكن حذف هذا الحساب لأن له حجوزات مسجلة، والحذف النهائي سيُتلف سجل الحجوزات. استخدم «تعطيل» بدلًا من الحذف.';
+  }
+  if (candidate?.message === 'CANNOT_DELETE_SELF') {
+    return 'لا يمكنك حذف حسابك بنفسك.';
+  }
+  if (candidate?.message === 'USER_NOT_FOUND') {
+    return 'الحساب غير موجود، ربما حُذف بالفعل.';
+  }
+  if (candidate?.message === 'DELETE_FAILED') {
+    return 'تعذر حذف الحساب. حاول مرة أخرى أو راجع سجل الدالة admin-delete-user.';
+  }
   if (candidate?.message === 'EMAIL_RATE_LIMIT') {
     return 'تم تجاوز الحد المسموح لإرسال البريد الإلكتروني حاليًا. انتظر ساعة ثم أعد المحاولة، أو فعّل SMTP مخصصًا في Supabase.';
   }

@@ -921,3 +921,9 @@ a { color: inherit; text-decoration: none; }
   .toast{bottom:calc(74px + env(safe-area-inset-bottom))}
 }
 @media print { .bottom-nav{display:none!important} }
+
+.action-chip.action-danger{color:#a93838;border-color:#ecd0d0;background:#fdf4f4}
+.action-chip.action-danger:hover:not(:disabled){background:#f8e3e3}
+.delete-warning{display:flex;gap:12px;align-items:flex-start;background:#fdf4f4;border:1px solid #ecd0d0;color:#7d2a2a;border-radius:10px;padding:14px;margin-bottom:16px;line-height:1.8}
+.delete-warning svg{flex:none;margin-top:3px}
+.delete-warning p{margin:6px 0 0;font-size:12px}
