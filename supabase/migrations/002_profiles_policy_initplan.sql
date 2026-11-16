@@ -1,3 +1,6 @@
+-- SUPERSEDED by 005_roles_and_bookings_v2.sql (which rewrites this policy with
+-- the same initplan fix and school scoping). Do NOT apply this file.
+
 -- DRAFT: not applied. Requires owner approval before running on the live project.
 --
 -- Advisor finding B: auth.uid() in profiles_read_scoped is re-evaluated per row.
