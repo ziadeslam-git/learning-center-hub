@@ -8,7 +8,8 @@
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-strip-types --test src/lib/schoolCalendar.test.mjs src/lib/bookingAndSettings.test.mjs"
+    "test": "node --experimental-strip-types --test src/lib/schoolCalendar.test.mjs src/lib/bookingAndSettings.test.mjs",
+    "dev:staging": "vite --config vite.config.ts --mode staging"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",
