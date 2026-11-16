@@ -37,11 +37,11 @@ Deno.serve(async (request) => {
 
     const { data: callerProfile, error: profileError } = await adminClient
       .from('profiles')
-      .select('role, is_active')
+      .select('role, is_active, school_id')
       .eq('id', userResult.user.id)
       .maybeSingle();
     if (profileError) throw profileError;
-    if (!callerProfile?.is_active || callerProfile.role !== 'admin') {
+    if (!callerProfile?.is_active || callerProfile.role !== 'coordinator') {
       return json(403, { error: 'ADMIN_REQUIRED' });
     }
 
@@ -58,7 +58,7 @@ Deno.serve(async (request) => {
 
     const appOrigin = new URL(appUrl).origin;
     const { data: invited, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
-      data: { full_name: fullName },
+      data: { full_name: fullName, school_id: callerProfile.school_id },
       // Invitees have no password yet; the app's set-password page needs the
       // session that the invite link establishes.
       redirectTo: `${appOrigin}/reset-password`,

@@ -1,16 +1,20 @@
 import {
   roleFromCode,
   roleToCode,
-  statusFromCode,
-  statusToCode,
+  statusFromCodes,
+  statusPatch,
   type BlockedSlot,
+  type BookingStatusCode,
+  type Catalog,
   type DemoData,
+  type ExecutionCode,
+  type OccupancySlot,
   type Reservation,
   type Role,
   type RoleCode,
   type SchoolSettings,
+  type Stage,
   type Status,
-  type StatusCode,
   type Teacher,
   emptyData,
 } from '../data.ts';
@@ -29,51 +33,63 @@ export type BookingRow = {
   booking_date: string;
   period_number: number;
   subject: string;
-  education_stage: 'متوسط' | 'ثانوي';
+  education_stage: Stage;
   grade: string;
   section: string | null;
-  lesson_topic: string;
+  lesson_topic: string | null;
   resources: string[] | null;
   student_count: number | null;
   notes: string | null;
-  status: StatusCode;
+  status: BookingStatusCode;
+  execution_status: ExecutionCode;
+  cancel_reason: string | null;
 };
 export type BlockedRow = {
   id: string;
   blocked_date: string;
   period_number: number | null;
   reason: string;
+  kind: 'holiday' | 'closure';
 };
-type SettingsRow = {
-  id: number;
-  school_name: string;
-  education_authority: string;
-  region_name: string;
-  center_administrator_name: string;
-  principal_name: string;
-  periods_per_day: number;
+type SchoolRow = {
+  id: string;
+  name_ar: string;
+  education_department_ar: string;
+  region_ar: string | null;
+  logo_url: string | null;
+  settings: Record<string, unknown> | null;
 };
 type OccupancyRow = {
+  id: string;
   booking_date: string;
   period_number: number;
-  status: StatusCode;
+  status: BookingStatusCode;
+  execution_status: ExecutionCode;
+  teacher_id: string;
+  teacher_name: string;
+  subject: string;
+  education_stage: Stage;
+  grade: string;
+  section: string | null;
 };
 
 export type BookingInput = {
   teacherId: string;
-  subject: string;
-  stage: 'متوسط' | 'ثانوي';
-  grade: string;
-  section: string;
+  gradeId: number;
+  sectionId: string;
+  subjectId: string;
   date: string;
   period: number;
   lessonTopic: string;
-  resources: string[];
+  resourceIds: string[];
   studentCount?: number;
   notes?: string;
 };
 export type ProfileUpdate = { name: string; role: Role; isActive: boolean };
-export type SettingsUpdate = Pick<SchoolSettings, 'school' | 'administration' | 'region' | 'centerAdmin' | 'principal'>;
+export type SettingsUpdate = Pick<
+  SchoolSettings,
+  'school' | 'administration' | 'region' | 'centerAdmin' | 'principal' | 'semester' | 'bookingWindowDays' | 'footerCopyright' | 'footerCredit'
+>;
 
 function mapProfile(row: ProfileRow): Teacher {
   return {
@@ -85,22 +101,46 @@ function mapProfile(row: ProfileRow): Teacher {
   };
 }
 
-function mapBooking(row: BookingRow, profiles: Map<string, Teacher>): Reservation {
+export function mapBooking(row: BookingRow, teacherName: string): Reservation {
   return {
     id: row.id,
     teacherId: row.teacher_id,
-    teacherName: profiles.get(row.teacher_id)?.name ?? 'معلم',
+    teacherName,
     subject: row.subject,
     stage: row.education_stage,
     grade: row.grade,
     section: row.section ?? '',
     date: row.booking_date,
     period: row.period_number,
-    lessonTopic: row.lesson_topic,
+    lessonTopic: row.lesson_topic ?? '',
     resources: row.resources ?? [],
     studentCount: row.student_count ?? undefined,
     notes: row.notes ?? undefined,
-    status: statusFromCode[row.status],
+    status: statusFromCodes(row.status, row.execution_status),
+    cancelReason: row.cancel_reason ?? undefined,
+  };
+}
+
+const text = (value: unknown, fallback = '') => (typeof value === 'string' ? value : fallback);
+
+export function mapSchool(row: SchoolRow): SchoolSettings {
+  const s = row.settings ?? {};
+  const semester = Number(s.current_semester) === 2 ? 2 : 1;
+  const windowDays = Number(s.booking_window_days);
+  return {
+    ...emptyData.settings,
+    schoolId: row.id,
+    school: row.name_ar,
+    administration: row.education_department_ar,
+    region: row.region_ar ?? '',
+    logoUrl: row.logo_url,
+    centerAdmin: text(s.center_administrator_name),
+    principal: text(s.principal_name),
+    semester,
+    bookingWindowDays: Number.isInteger(windowDays) && windowDays > 0 ? windowDays : 30,
+    footerCopyright: text(s.footer_copyright),
+    footerCredit: typeof s.footer_credit === 'string' && s.footer_credit.trim() ? s.footer_credit : null,
+    raw: s,
   };
 }
 
@@ -128,76 +168,122 @@ export async function loadAppData(role: Role, userId: string): Promise<DemoData>
     .order('full_name');
   const scopedProfilesQuery = role === 'المعلم' ? profilesQuery.eq('id', userId) : profilesQuery;
 
-  const [profilesResult, bookingsResult, blockedResult, settingsResult, occupancyResult] = await Promise.all([
+  const results = await Promise.all([
     scopedProfilesQuery,
     client.from('bookings').select('*').order('booking_date', { ascending: false }),
-    client.from('blocked_slots').select('id, blocked_date, period_number, reason').order('blocked_date'),
-    client.from('school_settings').select('*').eq('id', 1).maybeSingle(),
-    client.from('occupancy_schedule').select('booking_date, period_number, status'),
+    client.from('blocked_slots').select('id, blocked_date, period_number, reason, kind').order('blocked_date'),
+    client.from('schools').select('id, name_ar, education_department_ar, region_ar, logo_url, settings').maybeSingle(),
+    client.from('occupancy_schedule').select('*'),
+    client.from('grades').select('id, name_ar, sort_order, stages(name_ar)').order('sort_order'),
+    client.from('sections').select('id, grade_id, name_ar, is_active').order('name_ar'),
+    client.from('subjects').select('id, name_ar, is_active').order('name_ar'),
+    client.from('grade_subjects').select('grade_id, subject_id, semester, weekly_periods'),
+    client.from('learning_resources').select('id, name_ar, sort_order, is_active').order('sort_order'),
+    client.from('periods').select('period_no, start_time, end_time').order('period_no'),
   ]);
+  const [profilesResult, bookingsResult, blockedResult, schoolResult, occupancyResult,
+    gradesResult, sectionsResult, subjectsResult, planResult, resourcesResult, periodsResult] = results;
 
-  const firstError = [
-    profilesResult.error,
-    bookingsResult.error,
-    blockedResult.error,
-    settingsResult.error,
-    occupancyResult.error,
-  ].find(Boolean);
+  const firstError = results.map((result) => result.error).find(Boolean);
   if (firstError) {
     logSupabaseDiagnostic('appData.select', firstError);
     throw firstError;
   }
-
-  if (!settingsResult.data) {
+  if (!schoolResult.data) {
     throw new Error('SCHOOL_SETTINGS_NOT_CONFIGURED');
   }
 
-  const profiles = (profilesResult.data ?? []) as ProfileRow[];
-  const teachers = profiles.map(mapProfile);
-  const profileById = new Map(teachers.map((profile) => [profile.id, profile]));
-  const settings = settingsResult.data as SettingsRow;
+  const teachers = ((profilesResult.data ?? []) as ProfileRow[]).map(mapProfile);
+  const occupancy = ((occupancyResult.data ?? []) as OccupancyRow[]).map(
+    (slot): OccupancySlot => ({
+      id: slot.id,
+      date: slot.booking_date,
+      period: slot.period_number,
+      status: statusFromCodes(slot.status, slot.execution_status),
+      teacherId: slot.teacher_id,
+      teacherName: slot.teacher_name,
+      subject: slot.subject,
+      stage: slot.education_stage,
+      grade: slot.grade,
+      section: slot.section ?? '',
+    }),
+  );
+  // Names come from the grid view, which covers teachers a teacher cannot read.
+  const names = new Map<string, string>([
+    ...occupancy.map((slot) => [slot.teacherId, slot.teacherName] as const),
+    ...teachers.map((t) => [t.id, t.name] as const),
+  ]);
+
+  const catalog: Catalog = {
+    grades: ((gradesResult.data ?? []) as unknown as { id: number; name_ar: string; sort_order: number; stages: { name_ar: Stage } | null }[]).map((g) => ({
+      id: g.id,
+      name: g.name_ar,
+      stage: g.stages?.name_ar ?? 'متوسط',
+      order: g.sort_order,
+    })),
+    sections: ((sectionsResult.data ?? []) as { id: string; grade_id: number; name_ar: string; is_active: boolean }[]).map((s) => ({
+      id: s.id,
+      gradeId: s.grade_id,
+      name: s.name_ar,
+      isActive: s.is_active,
+    })),
+    subjects: ((subjectsResult.data ?? []) as { id: string; name_ar: string; is_active: boolean }[]).map((s) => ({
+      id: s.id,
+      name: s.name_ar,
+      isActive: s.is_active,
+    })),
+    plan: ((planResult.data ?? []) as { grade_id: number; subject_id: string; semester: 1 | 2; weekly_periods: number | null }[]).map((p) => ({
+      gradeId: p.grade_id,
+      subjectId: p.subject_id,
+      semester: p.semester,
+      weeklyPeriods: p.weekly_periods,
+    })),
+    resources: ((resourcesResult.data ?? []) as { id: string; name_ar: string; sort_order: number; is_active: boolean }[]).map((r) => ({
+      id: r.id,
+      name: r.name_ar,
+      order: r.sort_order,
+      isActive: r.is_active,
+    })),
+    periods: ((periodsResult.data ?? []) as { period_no: number; start_time: string | null; end_time: string | null }[]).map((p) => ({
+      no: p.period_no,
+      start: p.start_time,
+      end: p.end_time,
+    })),
+  };
 
   return {
     teachers,
-    reservations: ((bookingsResult.data ?? []) as BookingRow[]).map((booking) => mapBooking(booking, profileById)),
-    occupancy: ((occupancyResult.data ?? []) as OccupancyRow[]).map((slot) => ({
-      date: slot.booking_date,
-      period: slot.period_number,
-      status: statusFromCode[slot.status],
-    })),
+    reservations: ((bookingsResult.data ?? []) as BookingRow[]).map((booking) =>
+      mapBooking(booking, names.get(booking.teacher_id) ?? 'معلم'),
+    ),
+    occupancy,
     blocked: ((blockedResult.data ?? []) as BlockedRow[]).map(
       (slot): BlockedSlot => ({
         id: slot.id,
         date: slot.blocked_date,
         period: slot.period_number,
         reason: slot.reason,
+        kind: slot.kind,
       }),
     ),
-    settings: {
-      ...emptyData.settings,
-      school: settings.school_name,
-      administration: settings.education_authority,
-      region: settings.region_name,
-      centerAdmin: settings.center_administrator_name,
-      principal: settings.principal_name,
-      periods: settings.periods_per_day,
-    },
+    settings: mapSchool(schoolResult.data as SchoolRow),
+    catalog,
   };
 }
 
 export async function createBooking(input: BookingInput): Promise<BookingRow> {
+  // subject/grade/section text are snapshots filled by the database trigger.
   const { data, error } = await requireSupabase()
     .from('bookings')
     .insert({
       teacher_id: input.teacherId,
       booking_date: input.date,
       period_number: input.period,
-      subject: input.subject,
-      education_stage: input.stage,
-      grade: input.grade,
-      section: input.section,
-      lesson_topic: input.lessonTopic,
-      resources: input.resources,
+      subject_id: input.subjectId,
+      grade_id: input.gradeId,
+      section_id: input.sectionId,
+      resource_ids: input.resourceIds,
+      lesson_topic: input.lessonTopic.trim() || null,
       student_count: input.studentCount ?? null,
       notes: input.notes ?? null,
       status: 'confirmed',
@@ -208,41 +294,52 @@ export async function createBooking(input: BookingInput): Promise<BookingRow> {
   return data as BookingRow;
 }
 
-export async function updateBookingStatus(id: string, status: Status): Promise<void> {
+export async function updateBookingStatus(id: string, status: Status, cancelReason?: string): Promise<BookingRow> {
   const { error, data } = await requireSupabase()
     .from('bookings')
-    .update({ status: statusToCode[status] })
+    .update(statusPatch(status, cancelReason))
     .eq('id', id)
-    .select('id')
+    .select('*')
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new Error('BOOKING_NOT_UPDATED');
+  return data as BookingRow;
 }
 
-export async function saveSchoolSettings(settings: SettingsUpdate): Promise<void> {
+export async function saveSchoolSettings(schoolId: string, raw: Record<string, unknown>, settings: SettingsUpdate): Promise<Record<string, unknown>> {
+  const nextSettings = {
+    ...raw,
+    center_administrator_name: settings.centerAdmin,
+    principal_name: settings.principal,
+    current_semester: settings.semester,
+    booking_window_days: settings.bookingWindowDays,
+    footer_copyright: settings.footerCopyright,
+    footer_credit: settings.footerCredit,
+  };
   const { error, data } = await requireSupabase()
-    .from('school_settings')
+    .from('schools')
     .update({
-      school_name: settings.school,
-      education_authority: settings.administration,
-      region_name: settings.region,
-      center_administrator_name: settings.centerAdmin,
-      principal_name: settings.principal,
+      name_ar: settings.school,
+      education_department_ar: settings.administration,
+      region_ar: settings.region || null,
+      settings: nextSettings,
     })
-    .eq('id', 1)
+    .eq('id', schoolId)
     .select('id')
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new Error('SCHOOL_SETTINGS_NOT_UPDATED');
+  return nextSettings;
 }
 
-export async function addBlockedSlot(date: string, period: number | null, reason: string): Promise<BlockedRow> {
+export async function addBlockedSlot(date: string, period: number | null, reason: string, kind: 'holiday' | 'closure' = 'closure'): Promise<BlockedRow> {
   const { data, error } = await requireSupabase()
     .from('blocked_slots')
     .insert({
       blocked_date: date,
       period_number: period,
       reason,
+      kind,
     })
     .select('*')
     .single();
@@ -346,6 +443,12 @@ export function arabicErrorMessage(error: unknown, fallback = 'تعذر إتما
     if (message.includes('cannot change their own role') || message.includes('users cannot change')) {
       return 'لا يمكنك تغيير دورك أو تعطيل حسابك بنفسك.';
     }
+    if (message.includes('cancel only before the period starts')) {
+      return 'لا يمكن إلغاء الحجز بعد بداية الحصة. تواصل مع أمين المركز.';
+    }
+    if (message.includes('only the coordinator can record execution')) {
+      return 'تسجيل التنفيذ متاح لأمين المركز فقط.';
+    }
     return 'رفضت قاعدة البيانات الطلب. تحقق من صلاحيات الحساب وسياسات الوصول في Supabase.';
   }
   if (status && status >= 500) {
@@ -364,17 +467,50 @@ export function arabicErrorMessage(error: unknown, fallback = 'تعذر إتما
     return 'ليست لديك صلاحية لتنفيذ هذا الإجراء، أو أن الحساب غير مفعّل.';
   }
   if (candidate?.code === '23514' || candidate?.code === 'P0001') {
-    if (message.includes('cannot block') || message.includes('active bookings')) {
+    if (message.includes('cannot block') || message.includes('active booking')) {
       return 'لا يمكن إغلاق فترة تحتوي على حجوزات نشطة.';
     }
     if (message.includes('conflicts with')) {
       return 'يوجد تعارض مع إغلاق مسجل مسبقًا لهذا اليوم.';
     }
-    if (message.includes('last active administrator')) {
-      return 'لا يمكن تعطيل أو تخفيض رتبة المسؤول النشط الأخير.';
+    if (message.includes('last active coordinator') || message.includes('last active administrator')) {
+      return 'لا يمكن تعطيل أو تغيير دور أمين المركز النشط الأخير.';
     }
-    if (message.includes('future date') || message.includes('scheduled for a future')) {
-      return 'يجب اختيار تاريخ مستقبلي ليوم دراسي.';
+    if (message.includes('already started')) {
+      return 'بدأت هذه الحصة بالفعل. اختر حصة لاحقة.';
+    }
+    if (message.includes('booking window')) {
+      return 'التاريخ خارج فترة الحجز المسموحة. اختر تاريخًا أقرب.';
+    }
+    if (message.includes('sunday through thursday')) {
+      return 'الحجز متاح من الأحد إلى الخميس فقط.';
+    }
+    if (message.includes('in the past')) {
+      return 'لا يمكن الحجز في تاريخ سابق.';
+    }
+    if (message.includes('study plan')) {
+      return 'المادة غير موجودة في خطة هذا الصف للفصل الدراسي الحالي.';
+    }
+    if (message.includes('section does not belong')) {
+      return 'الشعبة المختارة لا تتبع هذا الصف.';
+    }
+    if (message.includes('subject, grade and section are required')) {
+      return 'اختر المادة والصف والشعبة.';
+    }
+    if (message.includes('reason is required')) {
+      return 'اكتب سبب الإلغاء.';
+    }
+    if (message.includes('is blocked')) {
+      return 'هذه الفترة مغلقة أو إجازة.';
+    }
+    if (message.includes('execution can be recorded only after')) {
+      return 'لا يمكن تسجيل التنفيذ قبل بداية الحصة.';
+    }
+    if (message.includes('recorded execution cannot be cancelled')) {
+      return 'لا يمكن إلغاء حجز سُجّل تنفيذه.';
+    }
+    if (message.includes('current or future school day') || message.includes('future school day')) {
+      return 'اختر اليوم الحالي أو يومًا دراسيًا قادمًا.';
     }
     return 'تعذر حفظ البيانات. تحقق من اليوم والفترة وحالة الحجز.';
   }

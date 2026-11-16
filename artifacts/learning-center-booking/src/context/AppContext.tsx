@@ -3,7 +3,6 @@ import type { Session } from '@supabase/supabase-js';
 import {
   emptyData,
   roleToCode,
-  statusFromCode,
   type DemoData,
   type Role,
   type Teacher,
@@ -17,6 +16,7 @@ import {
   deleteBlockedSlot as deleteBlockedSlotRequest,
   fetchOwnProfile,
   loadAppData,
+  mapBooking,
   saveSchoolSettings as saveSchoolSettingsRequest,
   updateBookingStatus as updateBookingStatusRequest,
   updateProfile as updateProfileRequest,
@@ -50,9 +50,9 @@ type AppContextValue = {
   updatePassword: (password: string) => Promise<void>;
   refreshData: () => Promise<void>;
   createBooking: (input: BookingInput) => Promise<void>;
-  updateBookingStatus: (id: string, status: Status) => Promise<void>;
+  updateBookingStatus: (id: string, status: Status, cancelReason?: string) => Promise<void>;
   saveSchoolSettings: (settings: SettingsUpdate) => Promise<void>;
-  addBlockedSlot: (date: string, period: number | null, reason: string) => Promise<void>;
+  addBlockedSlot: (date: string, period: number | null, reason: string, kind?: 'holiday' | 'closure') => Promise<void>;
   deleteBlockedSlot: (id: string) => Promise<void>;
   updateProfile: (id: string, update: ProfileUpdate) => Promise<void>;
   inviteUser: (email: string, fullName: string, role: Role) => Promise<void>;
@@ -298,72 +298,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const createBooking = useCallback(async (input: BookingInput) => {
     const row = await createBookingRequest(input);
     const teacher = data.teachers.find((t) => t.id === input.teacherId) || profile;
-    const newReservation: Reservation = {
-      id: row.id,
-      teacherId: row.teacher_id,
-      teacherName: teacher?.name ?? 'معلم',
-      subject: row.subject,
-      stage: row.education_stage,
-      grade: row.grade,
-      section: row.section ?? '',
-      date: row.booking_date,
-      period: row.period_number,
-      lessonTopic: row.lesson_topic,
-      resources: row.resources ?? [],
-      studentCount: row.student_count ?? undefined,
-      notes: row.notes ?? undefined,
-      status: statusFromCode[row.status],
-    };
+    const reservation = mapBooking(row, teacher?.name ?? 'معلم');
     setData((prev) => ({
       ...prev,
-      reservations: [newReservation, ...prev.reservations],
-      occupancy: [{ date: row.booking_date, period: row.period_number, status: 'مؤكد' }, ...prev.occupancy],
+      reservations: [reservation, ...prev.reservations],
+      occupancy: [{
+        id: reservation.id,
+        date: reservation.date,
+        period: reservation.period,
+        status: reservation.status,
+        teacherId: reservation.teacherId,
+        teacherName: reservation.teacherName,
+        subject: reservation.subject,
+        stage: reservation.stage,
+        grade: reservation.grade,
+        section: reservation.section,
+      }, ...prev.occupancy],
     }));
   }, [data.teachers, profile]);
 
-  const updateBookingStatus = useCallback(async (id: string, status: Status) => {
-    await updateBookingStatusRequest(id, status);
+  const updateBookingStatus = useCallback(async (id: string, status: Status, cancelReason?: string) => {
+    const row = await updateBookingStatusRequest(id, status, cancelReason);
     setData((prev) => {
-      let targetDate = '';
-      let targetPeriod = 0;
-      const reservations = prev.reservations.map((r) => {
-        if (r.id === id) {
-          targetDate = r.date;
-          targetPeriod = r.period;
-          return { ...r, status };
-        }
-        return r;
-      });
-      const occupancy = prev.occupancy.map((o) => {
-        if (o.date === targetDate && o.period === targetPeriod) {
-          return { ...o, status };
-        }
-        return o;
-      });
+      const current = prev.reservations.find((r) => r.id === id);
+      const updated = mapBooking(row, current?.teacherName ?? 'معلم');
+      const reservations = prev.reservations.map((r) => (r.id === id ? updated : r));
+      // A cancelled booking frees the period in the grid.
+      const occupancy = updated.status === 'ملغي'
+        ? prev.occupancy.filter((o) => o.id !== id)
+        : prev.occupancy.map((o) => (o.id === id ? { ...o, status: updated.status } : o));
       return { ...prev, reservations, occupancy };
     });
   }, []);
 
   const saveSchoolSettings = useCallback(async (settings: SettingsUpdate) => {
-    await saveSchoolSettingsRequest(settings);
-    setData((prev) => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
-        school: settings.school,
-        administration: settings.administration,
-        region: settings.region,
-        centerAdmin: settings.centerAdmin,
-        principal: settings.principal,
-      },
-    }));
-  }, []);
+    const raw = await saveSchoolSettingsRequest(data.settings.schoolId, data.settings.raw, settings);
+    setData((prev) => ({ ...prev, settings: { ...prev.settings, ...settings, raw } }));
+  }, [data.settings.schoolId, data.settings.raw]);
 
-  const addBlockedSlot = useCallback(async (date: string, period: number | null, reason: string) => {
-    const row = await addBlockedSlotRequest(date, period, reason);
+  const addBlockedSlot = useCallback(async (date: string, period: number | null, reason: string, kind: 'holiday' | 'closure' = 'closure') => {
+    const row = await addBlockedSlotRequest(date, period, reason, kind);
     setData((prev) => ({
       ...prev,
-      blocked: [...prev.blocked, { id: row.id, date: row.blocked_date, period: row.period_number, reason: row.reason }],
+      blocked: [...prev.blocked, { id: row.id, date: row.blocked_date, period: row.period_number, reason: row.reason, kind: row.kind }],
     }));
   }, []);
 

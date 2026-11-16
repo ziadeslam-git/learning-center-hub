@@ -10,7 +10,7 @@ import {
   weekEndISO,
   weekStartISO,
 } from './schoolCalendar.ts';
-import { roles, statusFromCode, statusToCode } from '../data.ts';
+import { roles, statusFromCodes, statusPatch } from '../data.ts';
 import { generateReportDocx } from './exportDocx.ts';
 
 // ----------------------------------------------------
@@ -142,10 +142,14 @@ test('booking cancellation: rules for teachers and administrators', () => {
   assert.equal(canCancel(otherFuture, 'أمين مركز مصادر التعلم', 'admin-id'), true);
 
   // Status mapping
-  assert.equal(statusToCode['ملغي'], 'cancelled');
-  assert.equal(statusFromCode['cancelled'], 'ملغي');
-  assert.equal(statusToCode['تم التنفيذ'], 'completed');
-  assert.equal(statusToCode['لم يتم التنفيذ'], 'not_completed');
+  // Status mapping: UI status <-> (status, execution_status)
+  assert.deepEqual(statusPatch('ملغي', ' فعالية '), { status: 'cancelled', cancel_reason: 'فعالية' });
+  assert.deepEqual(statusPatch('تم التنفيذ'), { execution_status: 'executed' });
+  assert.deepEqual(statusPatch('لم يتم التنفيذ'), { execution_status: 'not_executed' });
+  assert.equal(statusFromCodes('cancelled', 'pending'), 'ملغي');
+  assert.equal(statusFromCodes('confirmed', 'executed'), 'تم التنفيذ');
+  assert.equal(statusFromCodes('confirmed', 'not_executed'), 'لم يتم التنفيذ');
+  assert.equal(statusFromCodes('confirmed', 'pending'), 'مؤكد');
 });
 
 // ----------------------------------------------------
@@ -350,7 +354,7 @@ test('performance: targeted state update preserves data without full table reloa
     resources: newRow.resources,
     studentCount: newRow.student_count,
     notes: undefined,
-    status: statusFromCode[newRow.status],
+    status: statusFromCodes(newRow.status, 'pending'),
   };
 
   // Prepend in-memory

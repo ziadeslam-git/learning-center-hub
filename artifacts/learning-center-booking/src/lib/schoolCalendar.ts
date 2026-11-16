@@ -72,17 +72,54 @@ export function formatSchoolDate(value: string, options: Intl.DateTimeFormatOpti
   return new Intl.DateTimeFormat('ar-SA-u-ca-gregory', { ...options, timeZone: 'UTC' }).format(dateFromISO(value));
 }
 
-export function isBookableDate(date: string, today: string): boolean {
-  // Mirrors the database rule: bookings must be on a future school day.
-  return date > today && isSchoolDay(date);
+// Current Riyadh wall-clock time as "HH:MM:SS".
+export function schoolNowTime(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Riyadh',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? '00';
+  return `${part('hour')}:${part('minute')}:${part('second')}`;
 }
 
-export type SlotState = 'reserved' | 'blocked' | 'past' | 'available';
+export type SlotTiming = { nowTime?: string; start?: string | null; windowDays?: number };
 
-export function slotState(date: string, today: string, reserved: boolean, blocked: boolean): SlotState {
+// Mirrors the database: a period is closed once its start time has passed.
+// Without a configured start time, today's period counts as not yet started.
+export function hasPeriodStarted(date: string, today: string, nowTime = '00:00:00', start: string | null = null): boolean {
+  if (date < today) return true;
+  if (date > today) return false;
+  return start !== null && start.slice(0, 8) <= nowTime;
+}
+
+export function isBeyondWindow(date: string, today: string, windowDays?: number): boolean {
+  return windowDays !== undefined && date > addSchoolDays(today, windowDays);
+}
+
+export function isBookableDate(date: string, today: string, timing: SlotTiming = {}): boolean {
+  return isSchoolDay(date)
+    && !hasPeriodStarted(date, today, timing.nowTime, timing.start ?? null)
+    && !isBeyondWindow(date, today, timing.windowDays);
+}
+
+export type SlotState = 'reserved' | 'blocked' | 'past' | 'closed' | 'available';
+
+export function slotState(date: string, today: string, reserved: boolean, blocked: boolean, timing: SlotTiming = {}): SlotState {
   if (reserved) return 'reserved';
   if (blocked) return 'blocked';
-  return date <= today ? 'past' : 'available';
+  if (hasPeriodStarted(date, today, timing.nowTime, timing.start ?? null)) return 'past';
+  return isBeyondWindow(date, today, timing.windowDays) ? 'closed' : 'available';
+}
+
+// Week the grid opens on: next week once nothing in this week can be booked
+// (weekend, or Thursday after its last period started).
+export function scheduleAnchorFor(today: string, nowTime: string, lastPeriodStart: string | null): string {
+  const end = weekEndISO(today);
+  const thursdayOver = today === end && lastPeriodStart !== null && lastPeriodStart.slice(0, 8) <= nowTime;
+  return end < today || thursdayOver ? addSchoolDays(weekStartISO(today), 7) : today;
 }
 
 // True while a signed-in user's profile has not finished loading. The render

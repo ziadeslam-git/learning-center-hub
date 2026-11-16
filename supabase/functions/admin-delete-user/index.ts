@@ -37,11 +37,11 @@ Deno.serve(async (request) => {
 
     const { data: callerProfile, error: profileError } = await adminClient
       .from('profiles')
-      .select('role, is_active')
+      .select('role, is_active, school_id')
       .eq('id', userResult.user.id)
       .maybeSingle();
     if (profileError) throw profileError;
-    if (!callerProfile?.is_active || callerProfile.role !== 'admin') {
+    if (!callerProfile?.is_active || callerProfile.role !== 'coordinator') {
       return json(403, { error: 'ADMIN_REQUIRED' });
     }
 
@@ -52,11 +52,12 @@ Deno.serve(async (request) => {
 
     const { data: target, error: targetError } = await adminClient
       .from('profiles')
-      .select('id, role, is_active')
+      .select('id, role, is_active, school_id')
       .eq('id', targetId)
       .maybeSingle();
     if (targetError) throw targetError;
-    if (!target) return json(404, { error: 'USER_NOT_FOUND' });
+    // A coordinator may only delete accounts in their own school.
+    if (!target || target.school_id !== callerProfile.school_id) return json(404, { error: 'USER_NOT_FOUND' });
 
     const { count, error: countError } = await adminClient
       .from('bookings')

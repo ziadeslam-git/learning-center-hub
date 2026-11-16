@@ -927,3 +927,6 @@ a { color: inherit; text-decoration: none; }
 .delete-warning{display:flex;gap:12px;align-items:flex-start;background:#fdf4f4;border:1px solid #ecd0d0;color:#7d2a2a;border-radius:10px;padding:14px;margin-bottom:16px;line-height:1.8}
 .delete-warning svg{flex:none;margin-top:3px}
 .delete-warning p{margin:6px 0 0;font-size:12px}
+
+/* Beyond the booking window: same look as a past slot. */
+.slot-closed{background:#fafbfa;color:#aab3af;cursor:not-allowed}
