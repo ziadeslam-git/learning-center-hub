@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -11,6 +12,20 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 const basePath = process.env.BASE_PATH ?? '/';
+
+// Environment files live at the monorepo root, matching the documented setup.
+const envDir = path.resolve(import.meta.dirname, '..', '..');
+
+// Staging must never silently fall back to .env.local, which is production.
+const modeIndex = process.argv.indexOf('--mode');
+if (
+  modeIndex >= 0 &&
+  process.argv[modeIndex + 1] === 'staging' &&
+  !fs.existsSync(path.join(envDir, '.env.staging.local')) &&
+  !fs.existsSync(path.join(envDir, '.env.staging'))
+) {
+  throw new Error(`Staging mode needs ${path.join(envDir, '.env.staging.local')} with the staging project's URL and publishable key.`);
+}
 
 export default defineConfig({
   base: basePath,
@@ -31,9 +46,8 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   root: path.resolve(import.meta.dirname),
-  // Keep environment files at the monorepo root, matching the documented setup.
   // Vite otherwise defaults envDir to `root` above (the app subdirectory).
-  envDir: path.resolve(import.meta.dirname, '..', '..'),
+  envDir,
   build: {
     outDir: path.resolve(import.meta.dirname, 'dist/public'),
     emptyOutDir: true,
