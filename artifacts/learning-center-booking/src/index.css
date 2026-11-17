@@ -1088,3 +1088,27 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 760px) { .quick-grid { grid-template-columns: 1fr; } }
 
 @media (max-width: 760px) { .bottom-pill::before { inset: 0 3px; } }
+
+/* ---- Phones: compact reservation cards (everything else lives in "تفاصيل الحجز") ---- */
+@media (max-width: 760px) {
+  .table-wrap tbody { gap: 8px; }
+  .table-wrap tbody tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 10px 12px; border-radius: 12px; }
+  .table-wrap tbody td { flex: 0 0 auto; flex-direction: row; align-items: center; gap: 6px; padding: 0; border: 0; }
+  .table-wrap tbody td::before { display: none; }
+  .table-wrap tbody td[data-label="موضوع الدرس"] { display: none; }
+
+  .table-wrap tbody td[data-label="المعلم"] { order: 1; flex: 1 1 0; min-width: 0; font-size: 14px; font-weight: 700; color: #1d2b28; }
+  .table-wrap tbody td[data-label="المعلم"] small { display: none; }
+  .table-wrap tbody td[data-label="الحالة"] { order: 2; }
+  .table-wrap tbody td[data-label="المادة والصف"] { order: 3; flex: 1 1 100%; align-items: baseline; gap: 8px; }
+  .table-wrap tbody td[data-label="المادة والصف"] b { font-size: 14px; }
+  .table-wrap tbody td[data-label="المادة والصف"] small { font-size: 12px; margin: 0; }
+  .table-wrap tbody td[data-label="التاريخ"] { order: 4; font-size: 13px; color: #52665d; }
+  .table-wrap tbody td[data-label="الفترة"] { order: 5; font-size: 13px; color: #52665d; }
+  .table-wrap tbody td[data-label="الفترة"]::before { display: inline; content: "·"; color: #9bb0a7; margin-inline-end: 4px; }
+  .table-wrap tbody td[data-label="الإجراء"] { order: 6; margin-inline-start: auto; border-top: 0; padding-top: 0; grid-column: auto; }
+  .table-wrap tbody td .row-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+  /* Teacher view has no teacher column: subject takes the first row next to the status. */
+  .table-wrap tbody tr:not(:has(td[data-label="المعلم"])) td[data-label="المادة والصف"] { order: 1; flex: 1 1 0; min-width: 0; }
+}
