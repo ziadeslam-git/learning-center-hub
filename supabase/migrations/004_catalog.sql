@@ -129,9 +129,9 @@ select '00000000-0000-4000-8000-000000000001', n from generate_series(1, 7) as n
 
 -- Study plan 1447هـ: (grade code, semester, track, subject, weekly periods).
 -- Intermediate subjects are the same in both semesters.
-create temporary table plan_seed (grade_code text, semester smallint, track text, subject text, weekly smallint);
+create table public.zz_plan_seed (grade_code text, semester smallint, track text, subject text, weekly smallint);
 
-insert into plan_seed
+insert into public.zz_plan_seed
 select g.code, sem.n, null, p.subject, p.weekly
 from (values
   ('int1', 'القرآن الكريم والدراسات الإسلامية', 5), ('int2', 'القرآن الكريم والدراسات الإسلامية', 5), ('int3', 'القرآن الكريم والدراسات الإسلامية', 5),
@@ -150,7 +150,7 @@ from (values
 join public.grades as g on g.code = p.grade_code
 cross join (values (1::smallint), (2::smallint)) as sem (n);
 
-insert into plan_seed (grade_code, semester, track, subject, weekly) values
+insert into public.zz_plan_seed (grade_code, semester, track, subject, weekly) values
   -- الأول الثانوي
   ('sec1', 1, 'general', 'القرآن الكريم وتفسيره', 4),
   ('sec1', 1, 'general', 'الرياضيات', 5),
@@ -215,16 +215,16 @@ insert into plan_seed (grade_code, semester, track, subject, weekly) values
   ('sec3', 2, 'general', 'الجغرافيا', 2);
 
 insert into public.subjects (school_id, name_ar)
-select distinct '00000000-0000-4000-8000-000000000001'::uuid, subject from plan_seed;
+select distinct '00000000-0000-4000-8000-000000000001'::uuid, subject from public.zz_plan_seed;
 
 insert into public.grade_subjects (school_id, grade_id, subject_id, semester, track, weekly_periods)
 select '00000000-0000-4000-8000-000000000001', g.id, s.id, p.semester, p.track, p.weekly
-from plan_seed as p
+from public.zz_plan_seed as p
 join public.grades as g on g.code = p.grade_code
 join public.subjects as s
   on s.school_id = '00000000-0000-4000-8000-000000000001' and s.name_ar = p.subject;
 
-drop table plan_seed;
+drop table public.zz_plan_seed;
 
 -- RLS ------------------------------------------------------------------------
 
