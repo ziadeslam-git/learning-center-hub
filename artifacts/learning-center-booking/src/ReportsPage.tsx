@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { ChartNoAxesCombined, Check, ClipboardList, Clock3 } from 'lucide-react';
 import type { DemoData, Reservation } from './data';
 import { addSchoolDays, countSchoolPeriods, dateFromISO, dateToISO, formatSchoolDate, schoolTodayISO, weekStartISO } from './lib/schoolCalendar';
 import { generateReportDocx } from './lib/exportDocx';
@@ -28,15 +27,6 @@ function schoolPeriods(data: DemoData, start: string, end: string) {
 
 function addDays(value: string, days: number) {
   return addSchoolDays(value, days);
-}
-
-function StatCard({ label, value, detail, icon: Icon }: { label: string; value: string | number; detail: string; icon: typeof Check }) {
-  return (
-    <article className="stat-card" data-testid={`report-stat-${label}`}>
-      <div className="stat-icon"><Icon size={19} /></div>
-      <div className="stat-copy"><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>
-    </article>
-  );
 }
 
 function countBy<T>(values: T[], getKey: (item: T) => string) {
@@ -161,19 +151,27 @@ export default function ReportsPage({ data }: Props) {
         <div className="report-range" data-testid="text-report-range">{formatDate(range.start)} — {formatDate(range.end, { day: 'numeric', month: 'long', year: 'numeric' })}</div>
       </section>
 
-      <div className="report-stats">
-        <StatCard label="إجمالي الحجوزات" value={reservations.length} detail="ضمن الفترة المحددة" icon={ClipboardList} />
-        <StatCard label="الحصص المنفذة" value={completed.length} detail="تم تنفيذها وتوثيقها" icon={Check} />
-        <StatCard label="الفترات المؤهلة" value={capacity} detail="بعد استبعاد الفترات المغلقة" icon={Clock3} />
-        <StatCard label="نسبة الإشغال الفعلي" value={`${occupancy}%`} detail="المنفذ ÷ الفترات المؤهلة" icon={ChartNoAxesCombined} />
-      </div>
-
-      <div className="report-extra-grid">
-        <div className="report-extra-item"><span>الحجوزات الملغاة</span><strong>{cancelled.length}</strong></div>
-        <div className="report-extra-item"><span>الحصص غير المنفذة</span><strong>{missed.length}</strong></div>
-        <div className="report-extra-item"><span>أكثر المواد استخدامًا</span><strong>{bestSubject}</strong></div>
-        <div className="report-extra-item"><span>أكثر الصفوف استفادة</span><strong>{bestGrade}</strong></div>
-      </div>
+      <section className="report-hero" aria-label="ملخص الفترة" data-testid="report-summary-hero">
+        <div className="hero-main">
+          <span>نسبة الإشغال الفعلي</span>
+          <strong data-testid="report-stat-occupancy">{occupancy}%</strong>
+          <div className="hero-bar" role="presentation"><i style={{ width: `${Math.min(100, occupancy)}%` }} /></div>
+          <small>{completed.length} حصة منفذة من أصل {capacity} فترة مؤهلة</small>
+        </div>
+        <div className="hero-side">
+          <div className="hero-metrics">
+            <div className="m-total"><b>{reservations.length}</b><span>إجمالي الحجوزات</span></div>
+            <div className="m-done"><b>{completed.length}</b><span>حصص منفذة</span></div>
+            <div className="m-missed"><b>{missed.length}</b><span>غير منفذة</span></div>
+            <div className="m-cancel"><b>{cancelled.length}</b><span>ملغاة</span></div>
+            <div className="m-capacity"><b>{capacity}</b><span>فترات مؤهلة</span></div>
+          </div>
+          <div className="hero-highlights">
+            <span><em>أكثر المواد استخدامًا</em><b>{bestSubject}</b></span>
+            <span><em>أكثر الصفوف استفادة</em><b>{bestGrade}</b></span>
+          </div>
+        </div>
+      </section>
 
       <div className="report-chart-grid">
         <section className="panel report-chart">
