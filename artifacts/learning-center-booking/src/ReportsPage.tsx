@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { DemoData, Reservation } from './data';
 import { addSchoolDays, countSchoolPeriods, dateFromISO, dateToISO, formatSchoolDate, schoolTodayISO, weekStartISO } from './lib/schoolCalendar';
 import { generateReportDocx } from './lib/exportDocx';
@@ -36,6 +37,62 @@ function countBy<T>(values: T[], getKey: (item: T) => string) {
     counts.set(key, (counts.get(key) || 0) + 1);
   });
   return [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+}
+
+const MONTH_NAMES = Array.from({ length: 12 }, (_, i) =>
+  new Intl.DateTimeFormat('ar-SA-u-ca-gregory', { month: 'long', timeZone: 'UTC' }).format(new Date(Date.UTC(2026, i, 1))));
+const arabicYear = (year: number) => new Intl.NumberFormat('ar-SA', { useGrouping: false }).format(year);
+
+// Themed month picker (the native one is dark, English and off-brand).
+function MonthPicker({ value, onChange, testId }: { value: string; onChange: (next: string) => void; testId: string }) {
+  const [open, setOpen] = useState(false);
+  const selectedYear = Number(value.slice(0, 4));
+  const selectedMonth = Number(value.slice(5, 7));
+  const [year, setYear] = useState(selectedYear);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const pick = (next: string) => { onChange(next); setOpen(false); };
+  const thisMonth = todayISO().slice(0, 7);
+
+  return (
+    <div className="month-picker" ref={rootRef}>
+      <button type="button" className={`month-trigger ${open ? 'open' : ''}`} aria-haspopup="dialog" aria-expanded={open}
+        onClick={() => { setYear(selectedYear); setOpen((current) => !current); }} data-testid={testId}>
+        <CalendarDays size={18} />
+        <span>{MONTH_NAMES[selectedMonth - 1]} {arabicYear(selectedYear)}</span>
+      </button>
+      {open && (
+        <div className="month-pop" role="dialog" aria-label="اختيار الشهر">
+          <div className="month-year">
+            <button type="button" onClick={() => setYear((y) => y - 1)} aria-label="السنة السابقة"><ChevronRight size={18} /></button>
+            <b>{arabicYear(year)}</b>
+            <button type="button" onClick={() => setYear((y) => y + 1)} aria-label="السنة التالية"><ChevronLeft size={18} /></button>
+          </div>
+          <div className="month-grid">
+            {MONTH_NAMES.map((name, index) => {
+              const next = `${year}-${String(index + 1).padStart(2, '0')}`;
+              return <button key={next} type="button" className={`${next === value ? 'selected' : ''} ${next === thisMonth ? 'current' : ''}`} onClick={() => pick(next)}>{name}</button>;
+            })}
+          </div>
+          <div className="month-foot"><button type="button" onClick={() => pick(thisMonth)}>هذا الشهر</button></div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function ReportsPage({ data }: Props) {
@@ -132,7 +189,8 @@ export default function ReportsPage({ data }: Props) {
       <section className="report-controls panel" aria-label="تحديد فترة التقرير">
         <div>
           <span className="field-label">الفترة الزمنية</span>
-          <div className="segmented">
+          <div className="segmented" style={{ ['--i' as string]: Math.max(0, periodButtons.findIndex((item) => item.value === preset)), ['--n' as string]: periodButtons.length } as CSSProperties}>
+            <span className="seg-pill" aria-hidden="true" />
             {periodButtons.map((item) => (
               <button key={item.value} type="button" className={preset === item.value ? 'active' : ''} onClick={() => setPreset(item.value)} data-testid={`button-report-${item.value}`}>
                 {item.label}
@@ -141,7 +199,7 @@ export default function ReportsPage({ data }: Props) {
           </div>
         </div>
         {preset === 'monthly' ? (
-          <label className="field"><span className="field-label">الشهر</span><input type="month" value={month} onChange={(event) => setMonth(event.target.value)} data-testid="input-report-month" /></label>
+          <div className="field"><span className="field-label">الشهر</span><MonthPicker value={month} onChange={setMonth} testId="input-report-month" /></div>
         ) : preset === 'custom' ? (
           <>
             <label className="field"><span className="field-label">من تاريخ</span><input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} data-testid="input-report-from" /></label>
